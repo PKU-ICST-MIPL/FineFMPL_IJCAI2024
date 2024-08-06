@@ -32,9 +32,6 @@ def set_up_datasets(args):
 
 
 
-
-
-
 def get_dataloader(args,session):
     if session == 0:
         trainset, trainloader, testloader, trainloader_cache = get_base_dataloader(args)

@@ -11,8 +11,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-from datasets import build_dataset
-from datasets.utils import build_data_loader
+
 import clip
 from utils import *
 
@@ -21,7 +20,6 @@ import time
 
 from einops import rearrange
 
-from datasets.imagenet import ImageNet
 
 from collections import OrderedDict
 from typing import Tuple, Union
@@ -149,12 +147,6 @@ class new_net(nn.Module):
         super(new_net, self).__init__()
 
 
-        '''
-        self.new_conv = nn.Sequential(
-            BasicConv(768, 768, kernel_size=3, stride=1, padding=1, relu=True, bias = False).half().cuda()
-        )
-        '''
-    
         self.new_linear = nn.Sequential(OrderedDict([
             ("linear1", nn.Linear(768, 768//6, bias = False).half().cuda()),
             ("relu", nn.ReLU(inplace=True)),
@@ -180,38 +172,22 @@ class prompt(nn.Module):
 
         self.cache_keys = cache_keys
 
-
-        #self.relu = nn.ReLU()
         self.relu = nn.LeakyReLU(0.2)
 
 
-
-        '''
-        self.linear_map_weight = nn.Sequential(
-            nn.BatchNorm1d(clip_weights.size(0)).to(clip_weights.dtype).cuda(),
-            nn.Linear(clip_weights.size(0), 128).to(clip_weights.dtype).cuda(),
-
-            nn.ELU(inplace=True).to(clip_weights.dtype).cuda(),
-
-            nn.BatchNorm1d(128).to(clip_weights.dtype).cuda(),
-            nn.Linear(128, clip_weights.size(0)).to(clip_weights.dtype).cuda(),
-        )
-        '''
         self.linear_map_visual = nn.Linear(clip_weights.size(0), clip_weights.size(0), bias=True).to(clip_model.dtype).cuda()
         self.linear_map_weight = nn.Linear(clip_weights.size(0), clip_weights.size(0), bias=True).to(clip_model.dtype).cuda()
 
         self.prompt_cls = nn.Parameter(torch.zeros(768).cuda()).cuda()
 
-        #self.new_trans = ResidualAttentionBlock_visual(768, 1).cuda()
         self.new_trans = new_net()
-
 
 
         self.n_ctx = 1
         self.dtype = clip_model.dtype
         ctx_dim = clip_model.ln_final.weight.shape[0]
         print("Initializing a generic context")
-        #ctx_vectors = torch.empty(self.n_ctx, ctx_dim, dtype=self.dtype).cuda()
+
 
         if dataset_name == 'cub200':
             ctx_vectors = torch.empty(200, self.n_ctx, ctx_dim, dtype=self.dtype).cuda()
@@ -223,10 +199,7 @@ class prompt(nn.Module):
 
         self.prompt_prefix = " ".join(["X"] * self.n_ctx)
 
-        self.ctx = nn.Parameter(ctx_vectors).to(clip_model.dtype).cuda()  # to be optimized 原始
-
-
-        #self.ctx = nn.Parameter(torch.zeros(self.n_ctx, ctx_dim)).to(clip_model.dtype).cuda()  # to be optimized
+        self.ctx = nn.Parameter(ctx_vectors).to(clip_model.dtype).cuda()  # to be optimized
 
 
 
@@ -236,14 +209,11 @@ class prompt(nn.Module):
 
 
 
-        #self.meta_net = nn.Linear(512, 512, bias=True).to(clip_model.dtype).cuda()
-
         self.fc1 = nn.Linear(512, 60, bias=True).to(clip_model.dtype).cuda()
         self.fc2 = nn.Linear(512, 5, bias=True).to(clip_model.dtype).cuda()
 
         self.dataset_name = dataset_name
 
-        #self.meta_net_con = nn.Linear(1024, 512, bias=True).to(clip_model.dtype).cuda()
 
         self.meta_net_con = nn.Sequential(OrderedDict([
             ("linear1", nn.Linear(1024, 512).to(clip_model.dtype).cuda()),
@@ -257,6 +227,7 @@ class prompt(nn.Module):
             ("relu", nn.ReLU(inplace=True)),
             ("linear2", nn.Linear(1024, 512).to(clip_model.dtype).cuda())
         ]))
+
 
         self.sigmoid = nn.Sigmoid()
 
@@ -275,7 +246,6 @@ class prompt(nn.Module):
             glo_logits = self.fc2(glo_fea)
 
 
-
         keys1 = keys.clone()
         
         cache_keys_new = rearrange(keys, 'a1 a2 -> a2 a1')
@@ -289,7 +259,6 @@ class prompt(nn.Module):
         x_new_residual = x_new_residual / x_new_residual.norm(dim=-1, keepdim=True)
         x_new= x_ori + x_new_residual
 
-        #y = x_new.clone()
 
         cache_keys_new = cache_keys_new / cache_keys_new.norm(dim=-1, keepdim=True)
         x_new = x_new / x_new.norm(dim=-1, keepdim=True)
@@ -297,10 +266,6 @@ class prompt(nn.Module):
         cache_keys_new = rearrange(cache_keys_new, 'a1 a2 -> a2 a1')
 
         x = x_new @ cache_keys_new
-        #x = x_ori @ self.cache_keys
-
-
-
 
 
         if obj_branch == -1:
@@ -310,7 +275,6 @@ class prompt(nn.Module):
             clip_weights_new = rearrange(clip_weights_new, 'a1 a2 -> a2 a1')
         else:
     
-
             keys1_con = rearrange(map_keys, 'a1 a2 -> a2 a1')
 
             con = self.meta_net_con(keys1_con)
@@ -324,17 +288,9 @@ class prompt(nn.Module):
 
             text_prompt_residual = self.meta_net(glo)
 
-
-
-
-
-
             classnames = [name.replace("_", " ") for name in classnames]
-            #name_lens = [len(_tokenizer.encode(name)) for name in classnames]
-
-            #prompts = [self.prompt_prefix + " " + 'a photo of a {}, a type of bird'.format(name) + "." for name in classnames]
+     
             prompts = [self.prompt_prefix + " " + name + "." for name in classnames]
-
 
 
             tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in prompts])
@@ -347,26 +303,15 @@ class prompt(nn.Module):
 
             if self.dataset_name == 'cub200':
 
-
                 ctx = self.ctx[ : 100+(session_flag-1)*10+10, :, :] + text_prompt_residual.unsqueeze(1)
 
             else:
 
-   
-     
                 ctx = self.ctx[ : 60+(session_flag-1)*5+5, :, :] + text_prompt_residual.unsqueeze(1)
-
-
-
-
 
 
             if ctx.dim() == 2:
                 ctx = ctx.unsqueeze(0).expand(n_cls, -1, -1)
-
-
-
-
 
 
             prefix = embedding[:, :1, :]
@@ -387,33 +332,6 @@ class prompt(nn.Module):
             clip_weights_new = rearrange(clip_weights_new, 'a1 a2 -> a2 a1')
 
 
-            #clip_weights = rearrange(clip_weights_ori.clone(), 'a1 a2 -> a2 a1')
-            #clip_weights_new = 0.05*clip_weights_new / clip_weights_new.norm(dim=-1, keepdim=True)  + clip_weights
-            #clip_weights_new = rearrange(clip_weights_new, 'a1 a2 -> a2 a1')
-
-
-
-
-
-
-
-
-
-
-
-
-        '''
-        if keys is None:
-            x = x_ori @ self.cache_keys
-        else:
-            x = x_ori @ keys
-
-
-        y = x_ori.clone()
-        clip_weights_new = clip_weights_ori.clone()
-        '''
-
-
         
         return x, y, clip_weights_new, glo_logits
 
@@ -431,29 +349,13 @@ class prompt_obj(nn.Module):
 
         self.cache_keys = cache_keys
 
-
-        #self.relu = nn.ReLU()
         self.relu = nn.LeakyReLU(0.2)
 
-
-
-        '''
-        self.linear_map_weight = nn.Sequential(
-            nn.BatchNorm1d(clip_weights.size(0)).to(clip_weights.dtype).cuda(),
-            nn.Linear(clip_weights.size(0), 128).to(clip_weights.dtype).cuda(),
-
-            nn.ELU(inplace=True).to(clip_weights.dtype).cuda(),
-
-            nn.BatchNorm1d(128).to(clip_weights.dtype).cuda(),
-            nn.Linear(128, clip_weights.size(0)).to(clip_weights.dtype).cuda(),
-        )
-        '''
         self.linear_map_visual = nn.Linear(clip_weights.size(0), clip_weights.size(0), bias=True).to(clip_model.dtype).cuda()
         self.linear_map_weight = nn.Linear(clip_weights.size(0), clip_weights.size(0), bias=True).to(clip_model.dtype).cuda()
 
         self.prompt_cls = nn.Parameter(torch.zeros(768).cuda()).cuda()
 
-        #self.new_trans = ResidualAttentionBlock_visual(768, 1).cuda()
         self.new_trans = new_net()
 
 
@@ -462,7 +364,6 @@ class prompt_obj(nn.Module):
         self.dtype = clip_model.dtype
         ctx_dim = clip_model.ln_final.weight.shape[0]
         print("Initializing a generic context")
-        #ctx_vectors = torch.empty(self.n_ctx, ctx_dim, dtype=self.dtype).cuda()
 
 
         if dataset_name == 'cub200':
@@ -476,19 +377,12 @@ class prompt_obj(nn.Module):
 
         self.prompt_prefix = " ".join(["X"] * self.n_ctx)
 
-        self.ctx = nn.Parameter(ctx_vectors).to(clip_model.dtype).cuda()  # to be optimized 原始
-
-
-        #self.ctx = nn.Parameter(torch.zeros(self.n_ctx, ctx_dim)).to(clip_model.dtype).cuda()  # to be optimized
-
+        self.ctx = nn.Parameter(ctx_vectors).to(clip_model.dtype).cuda()  # to be optimized 
 
 
         self.clip_model = clip_model
 
         self.text_encoder = TextEncoder(clip_model)
-
-
-
 
 
         self.fc1 = nn.Linear(512, 60, bias=True).to(clip_model.dtype).cuda()
@@ -543,7 +437,6 @@ class prompt_obj(nn.Module):
         x_new_residual = x_new_residual / x_new_residual.norm(dim=-1, keepdim=True)
         x_new= x_ori + x_new_residual
 
-        #y = x_new.clone()
 
         cache_keys_new = cache_keys_new / cache_keys_new.norm(dim=-1, keepdim=True)
         x_new = x_new / x_new.norm(dim=-1, keepdim=True)
@@ -551,26 +444,7 @@ class prompt_obj(nn.Module):
         cache_keys_new = rearrange(cache_keys_new, 'a1 a2 a3 -> a3 a2 a1')
 
 
-
-
-
-
-        '''
-        aff = []
-        for i in range(12):
-            sim = x_new[:,i+1,:] @ cache_keys_new[:,i+1,:]
-            aff.append(sim)
-
-        aff = torch.stack(aff, dim=0)
-        x = torch.mean(aff, dim=0) + x_new[:,0,:] @ cache_keys_new[:,0,:]
-        '''
-
         x = x_new[:,0,:] @ cache_keys_new[:,0,:]
-
-        #x = x_new @ cache_keys_new
-        #x = x_ori @ self.cache_keys
-
-
 
 
         if obj_branch == -1:
@@ -600,47 +474,30 @@ class prompt_obj(nn.Module):
             text_prompt_residual = text_prompt_residual.unsqueeze(1)
 
 
-
-
-
-
             classnames = [name.replace("_", " ") for name in classnames]
-            #name_lens = [len(_tokenizer.encode(name)) for name in classnames]
-
-            #prompts = [self.prompt_prefix + " " + 'a photo of a {}, a type of bird'.format(name) + "." for name in classnames]
+          
             prompts = [self.prompt_prefix + " " + name + "." for name in classnames]
 
 
-
             tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in prompts])
+
             with torch.no_grad():
                 embedding = self.clip_model.token_embedding(tokenized_prompts).to(self.clip_model.dtype).cuda()
-
 
             n_cls = len(classnames)
 
 
-
             if self.dataset_name == 'cub200':
 
- 
                 ctx = self.ctx[ : 100+(session_flag-1)*10+10, :, :] + text_prompt_residual
-
 
             else:
 
-         
                 ctx = self.ctx[ : 60+(session_flag-1)*5+5, :, :] + text_prompt_residual
-
-
-
 
 
             if ctx.dim() == 2:
                 ctx = ctx.unsqueeze(0).expand(n_cls, -1, -1)
-
-
-
 
 
 
@@ -662,50 +519,8 @@ class prompt_obj(nn.Module):
             clip_weights_new = rearrange(clip_weights_new, 'a1 a2 -> a2 a1')
 
 
-            #clip_weights = rearrange(clip_weights_ori.clone(), 'a1 a2 -> a2 a1')
-            #clip_weights_new = 0.05*clip_weights_new / clip_weights_new.norm(dim=-1, keepdim=True)  + clip_weights
-            #clip_weights_new = rearrange(clip_weights_new, 'a1 a2 -> a2 a1')
 
-
-
-
-
-
-
-
-
-
-
-
-        '''
-        if keys is None:
-            x = x_ori @ self.cache_keys
-        else:
-            x = x_ori @ keys
-
-
-        y = x_ori.clone()
-        clip_weights_new = clip_weights_ori.clone()
-        '''
-
-
-        
         return x, y, clip_weights_new, obj_logits
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -718,7 +533,7 @@ class BasicConv(nn.Module):
         self.bn = nn.BatchNorm2d(out_planes, eps=1e-5,
                                  momentum=0.01, affine=True) if bn else None
         self.relu = nn.ReLU() if relu else None
-        #self.relu = QuickGELU() if relu else None
+
 
     def forward(self, x):
         x = self.conv(x)
@@ -731,31 +546,19 @@ class BasicConv(nn.Module):
 
 
 
-
-
-
-
-
-
-
-
-
 def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_model, train_loader_F, cache_keys_obj, key=None, value=None, obj=None, flag=0, test_clip_weights=None,
                       total_classnames=None, temp_classnames=None, session_flag=0, dataset_name = None):
     
 
-
-
     file_record = './output/' + cfg['dataset'] + '-' + 'acc_record.txt'
-
 
     
     if dataset_name == 'cub200':
-        factor = 0.5 #对象分支的权重
+        factor = 0.5 
     elif dataset_name == 'cifar100':
-        factor = 2.0 #对象分支的权重
+        factor = 2.0 
     elif dataset_name == 'mini_imagenet':
-        factor = 0.5 #对象分支的权重
+        factor = 0.5 
     
 
 
@@ -885,7 +688,7 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
     
 
 
-    alpha = 1/0.03  #cache相似度乘以alpha等于cache_logits 
+    alpha = 1/0.03  
 
 
     glo_open = 1
@@ -893,7 +696,7 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
 
 
 
-    factor_clip = 1 #tip_logits = factor_clip * clip_logits + factor_cache * cache_logits
+    factor_clip = 1 
 
     if dataset_name == 'cub200':
         factor_cache = 1.5
@@ -937,7 +740,6 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
 
 
 
-    #map_keys =  torch.cat([te_keys, te_keys_obj])
     map_keys =  torch.cat([te_keys, te_keys_obj[:,0,:]])
 
 
@@ -964,7 +766,6 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
             image_features = image_features0/image_features0.norm(dim=-1, keepdim=True)
             image_features_obj = image_features0_obj/image_features0_obj.norm(dim=-1, keepdim=True)
 
-            #map_keys =  torch.cat([cache_keys, cache_keys_obj[:,0,:]])
 
             affinity, image_features_new, clip_weights_new, glo_logits_temp = adapter(image_features, clip_weights, keys = te_keys, classnames = te_classnames, session_flag=session_flag, 
                                                                      map_keys=map_keys, map_net=adapter.meta_net) 
@@ -1074,14 +875,7 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
 
 
 
-
-
-
-
             tip_logits = glo_open*tip_logits1 + obj_open*factor*tip_logits2
-
-
-
 
 
 
@@ -1089,7 +883,7 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
 
             print("\n****FineFMPL's test accuracy: {:.2f}. ****\n".format(acc))
 
-            #if acc > best_acc:
+
             if train_idx == cfg['train_epoch'] - 1:
                 best_acc = acc
                 best_epoch = train_idx
@@ -1097,49 +891,12 @@ def run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_mo
                 torch.save(adapter_obj, cfg['cache_dir'] + "/best_F_obj_" + str(cfg['shots']) + "shots.pt")
 
 
-    #adapter = torch.load(cfg['cache_dir'] + "/best_F_" + str(cfg['shots']) + "shots.pt")
-    #adapter_obj = torch.load(cfg['cache_dir'] + "/best_F_obj_" + str(cfg['shots']) + "shots.pt")
-    print(f"**** After fine-tuning,FineFMPL's best test accuracy: {best_acc:.2f}, at epoch: {best_epoch}. ****\n")
+    print(f"**** After fine-tuning, FineFMPL's best test accuracy: {best_acc:.2f}, at epoch: {best_epoch}. ****\n")
 
     with open(file_record, 'a') as file:
         file.write("\n\n\n----------------------------------------------------------\n")
-        file.write(f"**** After fine-tuning,FineFMPL's best test accuracy: {best_acc:.2f}, at epoch: {best_epoch}. ****\n")
+        file.write(f"**** After fine-tuning, FineFMPL's best test accuracy: {best_acc:.2f}, at epoch: {best_epoch}. ****\n")
 
-
-
-    '''
-    print("\n-------- Searching hyperparameters on the val set. --------")
-
-    val_features, val_labels, val_features_obj = pre_load_features(cfg, "val", clip_model, val_loader, adapter.prompt_cls, adapter.new_trans)
-    test_features, test_labels, test_features_obj = pre_load_features(cfg, "test", clip_model, test_loader, adapter.prompt_cls, adapter.new_trans)
-
-    # Search Hyperparameters
-    best_beta, best_alpha = search_hp(cfg, cache_keys, cache_values, val_features, val_labels, clip_weights, adapter=adapter, adapter_obj=adapter_obj, val_features_obj=val_features_obj, cache_keys_obj=cache_keys_obj)
-
-    print("\n-------- Evaluating on the test set. --------")
-   
-    affinity, image_features_new, clip_weights_new = adapter(test_features, clip_weights)
-    cache_logits = ((-1) * (best_beta - best_beta * affinity)).exp() @ cache_values
-    clip_logits = 100. * image_features_new @ clip_weights_new
-    tip_logits1 = clip_logits + cache_logits * best_alpha
-
-    affinity, image_features_new, clip_weights_new = adapter_obj(test_features_obj, clip_weights)
-    cache_logits = ((-1) * (best_beta - best_beta * affinity)).exp() @ cache_values
-    clip_logits = 100. * image_features_new @ clip_weights_new
-    tip_logits2 = clip_logits + cache_logits * best_alpha
-
-    tip_logits = tip_logits1 + factor*tip_logits2
-
-
-
-    acc = cls_acc(tip_logits, test_labels)
-    print("****FineFMPL's test accuracy using the best hyper-parameter obtained on val dataset: {:.2f}. ****\n".format(max(best_acc, acc)))
-
-
-    with open(file_record, 'a') as file:
-        file.write("****FineFMPL's test accuracy using the best hyper-parameter obtained on val dataset: {:.2f}. ****\n".format(max(best_acc, acc)))
-    '''
-    
 
 
 
@@ -1170,10 +927,7 @@ cub200_class = ['Black footed Albatross', 'Laysan Albatross', 'Sooty Albatross',
 
 
 
-
 mini_imagenet_class =['house finch', 'American robin', 'triceratops', 'green mamba', 'harvestman', 'toucan', 'goose', 'jellyfish', 'nematode', 'red king crab', 'dugong', 'Treeing Walker Coonhound', 'Ibizan Hound', 'Saluki', 'Golden Retriever', 'Gordon Setter', 'Komondor', 'Boxer', 'Tibetan Mastiff', 'French Bulldog', 'Alaskan Malamute', 'Dalmatian', 'Newfoundland dog', 'Miniature Poodle', 'Alaskan tundra wolf', 'African wild dog', 'Arctic fox', 'lion', 'meerkat', 'ladybug', 'rhinoceros beetle', 'ant', 'black-footed ferret', 'three-toed sloth', 'rock beauty fish', 'aircraft carrier', 'trash can', 'barrel', 'beer bottle', 'bookstore', 'cannon', 'carousel', 'cardboard box / carton', 'catamaran', 'bell or wind chime', 'clogs', 'cocktail shaker', 'combination lock', 'crate', 'cuirass', 'dishcloth', 'dome', 'electric guitar', 'filing cabinet', 'fire screen', 'frying pan', 'garbage truck', 'hair clip', 'holster', 'gymnastic horizontal bar', 'hourglass', 'iPod', 'lipstick', 'miniskirt', 'missile', 'mixing bowl', 'oboe', 'pipe organ', 'parallel bars', 'pencil case', 'photocopier', 'poncho', 'prayer rug', 'fishing casting reel', 'school bus', 'scoreboard', 'slot machine', 'snorkel', 'solar thermal collector', 'spider web', 'stage', 'tank', 'front curtain', 'tile roof', 'tobacco shop', 'unicycle', 'upright piano', 'vase', 'wok', 'split-rail fence', 'sailboat', 'traffic or street sign', 'consomme', 'trifle', 'hot dog', 'orange', 'cliff', 'coral reef', 'bolete', 'corn cob']
-
-
 
 
 
@@ -1192,7 +946,7 @@ def main(txt=None, key=None, value=None, obj=None, flag=0, test_clip_weights=Non
     # Load config file
     args = get_arguments()
 
-    #print(args.config)
+
 
     assert (os.path.exists(args.config))
     
@@ -1231,98 +985,61 @@ def main(txt=None, key=None, value=None, obj=None, flag=0, test_clip_weights=Non
 
     # CLIP
     clip_model, preprocess = clip.load(cfg['backbone'])
-    #clip_model.eval()     #使clip_model中的Prompt token可以被训练
+ 
 
     # Prepare dataset
     random.seed(1)
     torch.manual_seed(1)
+
+
+
+    print("Preparing dataset.")
+
     
-    if cfg['dataset'] == 'imagenet':
-        print("Preparing ImageNet dataset.")
-        imagenet = ImageNet(cfg['root_path'], cfg['shots'], preprocess)
+    args = set_up_datasets(args)
+    dataset_name = args.dataset
 
-        val_loader = torch.utils.data.DataLoader(imagenet.test, batch_size=32, num_workers=8, shuffle=False)
-        test_loader = torch.utils.data.DataLoader(imagenet.test, batch_size=64, num_workers=8, shuffle=False)
-
-        train_loader_cache = torch.utils.data.DataLoader(imagenet.train, batch_size=256, num_workers=8, shuffle=False)
-        train_loader_F = torch.utils.data.DataLoader(imagenet.train, batch_size=256, num_workers=8, shuffle=True)
-
-
-        # Textual features
-        print("Getting textual features as CLIP's classifier.")
-        clip_weights = clip_classifier(imagenet.classnames, imagenet.template, clip_model)
-
-
-    else:
-        print("Preparing dataset.")
-        #dataset = build_dataset(cfg['dataset'], cfg['root_path'], cfg['shots'], txt)
-
+    if dataset_name == 'cub200':
+                
+        if session_flag == 0:
+            classnames = cub200_class[:100]
+        else:
+            classnames = cub200_class[100 + 10*(session_flag-1) : 100 + 10*session_flag]
         
-        args = set_up_datasets(args)
-        dataset_name = args.dataset
 
-        if dataset_name == 'cub200':
-                    
-            if session_flag == 0:
-                classnames = cub200_class[:100]
-            else:
-                classnames = cub200_class[100 + 10*(session_flag-1) : 100 + 10*session_flag]
-            
-
-        if dataset_name == 'mini_imagenet':
-                    
-            if session_flag == 0:
-                classnames = mini_imagenet_class[:60]
-            else:
-                classnames = mini_imagenet_class[60+5*(session_flag-1) : 60+5*session_flag]
-            
-
-        if dataset_name == 'cifar100':
-                    
-            if session_flag == 0:
-                classnames = cifar100_class[:60]
-            else:
-                classnames = cifar100_class[60+5*(session_flag-1) : 60+5*session_flag]
-            
-
-
-
-
-
-
-        #classnames = dataset.classnames
-            
-        template = ['a photo of a {}']
-
-
-        '''
-        val_loader = build_data_loader(data_source=dataset.val, batch_size=256, is_train=False, tfm=preprocess, shuffle=False)
-        test_loader = build_data_loader(data_source=dataset.test, batch_size=256, is_train=False, tfm=preprocess, shuffle=False)
-
-        train_tranform = transforms.Compose([
-            transforms.RandomResizedCrop(size=224, scale=(0.5, 1), interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
-        ])
-
-        train_loader_cache = build_data_loader(data_source=dataset.train_x, batch_size=256, tfm=train_tranform, is_train=True, shuffle=False)
-        train_loader_F = build_data_loader(data_source=dataset.train_x, batch_size=256, tfm=train_tranform, is_train=True, shuffle=True)
-        '''
-
+    if dataset_name == 'mini_imagenet':
+                
+        if session_flag == 0:
+            classnames = mini_imagenet_class[:60]
+        else:
+            classnames = mini_imagenet_class[60+5*(session_flag-1) : 60+5*session_flag]
         
-        trainset, train_loader_F,  test_loader, train_loader_cache = get_dataloader(args, session_flag)
+
+    if dataset_name == 'cifar100':
+                
+        if session_flag == 0:
+            classnames = cifar100_class[:60]
+        else:
+            classnames = cifar100_class[60+5*(session_flag-1) : 60+5*session_flag]
+        
+
+
+    template = ['a photo of a {}']
+
+
+    
+    trainset, train_loader_F,  test_loader, train_loader_cache = get_dataloader(args, session_flag)
 
 
 
 
-        # Textual features
-        print("\nGetting textual features as CLIP's classifier.")
-        clip_weights = clip_classifier(classnames, template, clip_model)
+    # Textual features
+    print("\nGetting textual features as CLIP's classifier.")
+    clip_weights = clip_classifier(classnames, template, clip_model)
 
-        print(classnames)
+    print(classnames)
 
-        temp_classnames = classnames
+    temp_classnames = classnames
 
     # Construct the cache model by few-shot training set
     print("\nConstructing cache model by few-shot visual features and labels.")
@@ -1386,15 +1103,6 @@ def main(txt=None, key=None, value=None, obj=None, flag=0, test_clip_weights=Non
 
 
 
-
-
-
-
-
-
-
-
-
     cache_keys = torch.stack(cache_keys)
     cache_values = torch.stack(cache_values)
     cache_keys_obj = torch.stack(cache_keys_obj)
@@ -1402,30 +1110,11 @@ def main(txt=None, key=None, value=None, obj=None, flag=0, test_clip_weights=Non
     cache_keys = rearrange(cache_keys, 'a1 a2 -> a2 a1')
     cache_keys_obj = rearrange(cache_keys_obj, 'a1 a2 a3-> a2 a3 a1')
 
-
-    #print("\nkeys shape.")
-    #print(cache_keys.shape, cache_values.shape, cache_keys_obj.shape)
-    #print(cache_values)
-
-    '''
-    if os.path.exists('./acc_record.txt'):
-        os.remove('./acc_record.txt')
-    '''
-
-    # ------------------------------------------ Tip-Adapter ------------------------------------------
-    #run_tip_adapter(cfg, cache_keys, cache_values, val_features, val_labels, test_features, test_labels, clip_weights)
-
     # ------------------------------------------FineFMPL ------------------------------------------
     run_fg_cpl(cfg, cache_keys, cache_values, test_loader, clip_weights, clip_model, train_loader_F, cache_keys_obj, key=key, value=value, obj=obj, flag=flag, test_clip_weights=test_clip_weights,
                       total_classnames = total_classnames, temp_classnames=temp_classnames, session_flag=session_flag, dataset_name=dataset_name)
     
-    '''
-    with open(file_record, 'a') as file:
-        file.write('######################################################################')
-        file.write("\n")
-        file.write("\n")
-        file.write("\n")
-    '''
+
 
     with open(file_record, 'a') as file:
         file.write("\n")
@@ -1433,6 +1122,9 @@ def main(txt=None, key=None, value=None, obj=None, flag=0, test_clip_weights=Non
         file.write("\n")
 
     return cache_keys, cache_values, cache_keys_obj, clip_weights, temp_classnames
+
+
+
 
 
 
@@ -1467,20 +1159,11 @@ if __name__ == '__main__':
                 value = value_temp.clone()
 
 
-
-
-
                 obj = torch.cat((obj, cache_keys_obj), dim=-1)
                 test_clip_weights = torch.cat((test_clip_weights, t_clip_weights), dim=-1)
 
 
-
                 total_classnames = total_classnames + temp_classnames
-
-
-
-
-
 
 
 
@@ -1509,9 +1192,6 @@ if __name__ == '__main__':
                 value = value_temp.clone()
 
 
-
-
-
                 obj = torch.cat((obj, cache_keys_obj), dim=-1)
                 test_clip_weights = torch.cat((test_clip_weights, t_clip_weights), dim=-1)
 
@@ -1520,12 +1200,8 @@ if __name__ == '__main__':
                 total_classnames = total_classnames + temp_classnames
 
 
-    #print(total_classnames)
-
-    #print(len(total_classnames))
-
-
-
-
+ 
+ 
     print('--------------------------------------------')
     print('total time: {:.1f}min'.format((time.time()-start_time)/60))
+    

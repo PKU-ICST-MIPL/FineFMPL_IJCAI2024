@@ -13,7 +13,6 @@ tensor_to_image = transforms.ToPILImage()
 import time
 
 
-
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -236,8 +235,6 @@ class ResidualAttentionBlock_visual(nn.Module):
         EPSILON = 1e-6
 
 
-
-        #进行probe为指针的特征加强操作
         if func is not None:
      
             fg_probe = x[-1,:,:].clone().unsqueeze(0)
@@ -279,112 +276,8 @@ class ResidualAttentionBlock_visual(nn.Module):
 
 
         
-
-
-
-
         output, weights = self.attention(self.ln_1(x))
         x = x + output
-
-
-
-
-        '''#逐层聚集显著Patch信息到prompt上，使其成为细粒度特征的 探针，指导进行显著信息提取
-        #print(weights.shape)
-        if y is not None:
-            atten = weights[:,:,0,1:-1]
-            atten = torch.mean(atten, dim=1, keepdim=True)
-            atten = atten/0.1
-            atten = F.softmax(atten, dim=-1)
-            atten = rearrange(atten, 'a1 a2 a3 -> a3 a1 a2')
-            temp_saliency = atten * x[1:-1,:,:].clone()
-            temp_saliency = torch.sum(temp_saliency, dim=0)
-            x[-1, :, :] = 0.95 * x[-1, :, :].clone() + 0.05 * temp_saliency 
-        '''
-
-
-
-        '''#将prompt做Probe对patch进行scale
-        if y is not None:
-            fg_probe = x[-1,:,:].clone().unsqueeze(0)
-            temp = x[1:-1, :, :].clone()
-
-            #fg_probe = fg_probe/fg_probe.norm(dim=-1, keepdim=True)
-            #temp = temp/temp.norm(dim=-1, keepdim=True)
-
-            fg_probe = rearrange(fg_probe, 'a1 a2 a3 -> a2 a3 a1') #(256, 768, 1)
-            temp = rearrange(temp, 'a1 a2 a3 -> a2 a1 a3') #(256, 196, 768)
-
-            temp = torch.bmm(temp, fg_probe)
-            temp = rearrange(temp, 'a1 a2 a3 -> a2 a1 a3')
-
-            #temp = temp/0.2
-
-            temp = F.sigmoid(temp)
-
-            #print(temp)
-
-            temp_patch = x[1:-1, :, :].clone() * temp
-
-            x = torch.cat([x[0,:,:].clone().unsqueeze(0), temp_patch, x[-1,:,:].clone().unsqueeze(0)], dim=0)
-        
-            #temp_patch_aug = torch.mean(temp_patch, dim=0)
-            #x[-1,:,:] = x[-1,:,:].clone() + temp_patch_aug
-        '''
-            
-
-
-        '''#9层之后，基于probe做scale
-        if y is not None:
-            if i > 9:
-
-                o1_query = x[-1,:,:].clone().unsqueeze(0)
-
-                o1_key = x[1:-1,:,:].clone()
-
-                o1_query = rearrange(o1_query, 'a1 a2 a3 -> a2 a1 a3') #(256, 1, 768)
-                o1_key = rearrange(o1_key, 'a1 a2 a3 -> a2 a1 a3') #(256, 196, 768)
-                o1_key_ori = o1_key.clone()
-
-
-                o1_query = o1_query/o1_query.norm(dim=-1, keepdim=True)
-                o1_key = o1_key/o1_key.norm(dim=-1, keepdim=True)
-
-                o1_query = rearrange(o1_query, 'a1 a2 a3 -> a1 a3 a2') #(256, 768, 1)
-                o1_value = torch.bmm(o1_key, o1_query)
-                
-
-                o1_value = o1_value.squeeze(2)/0.1
-                o1_value = F.sigmoid(o1_value)
-                #print(o1_value[0,:])
-                o1_value = o1_value.unsqueeze(2)
-
-                o1_new = o1_value*o1_key_ori
-                o1_new = rearrange(o1_new, 'a1 a2 a3 -> a2 a1 a3') #(196, 256, 768) 
-                x[1:-1,:,:] = o1_new
-        '''
-
-
-
-
-        #x_ori = x.clone()
-
-        '''#使用卷积操作对特征进行通道间的交互和提取
-        if func is None:
-            x = x + self.mlp(self.ln_2(x))
-        else:
-            img = x[1:-1, :, :].clone()
-            img = rearrange(img, 'a1 a2 a3 -> a2 a3 a1') #(256, 768, 196)
-            img = img.contiguous().view(img.size(0), img.size(1), 14, 14)
-            img = img + func.new_conv(img)
-            
-            img = img.contiguous().view(img.size(0), img.size(1), -1)
-            img = rearrange(img, 'a1 a2 a3 -> a3 a1 a2') #(196, 256, 768)
-
-            x[1:-1, :, :] = img
-
-            x = x + self.mlp(self.ln_2(x)) #+ x_ori
-        '''
 
 
         x = x + self.mlp(self.ln_2(x))
@@ -392,6 +285,7 @@ class ResidualAttentionBlock_visual(nn.Module):
 
 
         return x, weights
+
 
 
 class Transformer_visual(nn.Module):
@@ -409,10 +303,8 @@ class Transformer_visual(nn.Module):
             last_map = torch.matmul(x[i], last_map)
 
 
-
         last_map = last_map[:,:,0,1:]
 
-        #print(last_map.shape)
 
         _, max_inx = last_map.max(2)
 
@@ -440,7 +332,7 @@ class Transformer_visual(nn.Module):
 
         last_map = last_map[:,:,0,1:-1]
 
-        #print(last_map.shape)
+
 
         _, max_inx = last_map.max(2)
 
@@ -457,8 +349,7 @@ class Transformer_visual(nn.Module):
 
 
 
-
-    #saliency map计算
+    #saliency map
     def saliency_extraction(self, xf_ori):
 
         xf = xf_ori.clone()
@@ -514,7 +405,7 @@ class Transformer_visual(nn.Module):
             contours, hierarchy = cv2.findContours(mat2, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
             area = []
-            # 找到最大的轮廓
+    
             if len(contours)==0:
                 coord[i, 0]=0
                 coord[i, 1]=0
@@ -532,9 +423,7 @@ class Transformer_visual(nn.Module):
                 coord[i, 2]=r
                 coord[i, 3]=s
 
-            #thres = thres/255.0
-            #saliency[i,:,:,:] = torch.where(saliency[i,:,:,:] > thres, saliency[i,:,:,:]/saliency[i,:,:,:], saliency[i,:,:,:]-saliency[i,:,:,:])
-        
+     
         coord = coord.detach()
 
         return coord, coord
@@ -553,85 +442,13 @@ class Transformer_visual(nn.Module):
         x_ori = x.clone()
         output_ori, weights = self.resblocks[-1](x_ori)
 
-        '''#以下实验已做，表明得到的注意力权重是对的，找到的视觉对象大致是准的
-        if image_ori is not None:
-            _, part_inx, attention_map = self.part_select(all_weights)
-
-            coord_ori, _ = self.saliency_extraction(attention_map)
-
-            coord = coord_ori.detach().cpu()
-            coord = coord.numpy()
-            coord = np.uint8(coord)
-  
-            inputs_batch_size = image_ori.size(0)
-
-            for i in range(inputs_batch_size):
-                a,b,c,d = coord[i]
-
-                p = int(a)
-                q = int(b)
-                r = int(c)
-                s = int(d)
-
-                saliency_figure = image_ori[i,:,:,:].clone()
-
-                #show = saliency_figure[:, 16*int(b):16*(int(b)+int(d)), 16*int(a):16*(int(a)+int(c))]
-                show = saliency_figure[:, 16*q:16*(q + s), 16*p:16*(p + r)]
-
-                show = show.unsqueeze(0)
-                show = F.interpolate(show, size=[224, 224], mode='bilinear')
-                show=show.squeeze(0)
-
-                #展示剪切原图片得到的对象区域
-                display = show.clone()
-                display = display.detach().cpu()
-                image = tensor_to_image(display)
-                img_name = './output_images/' + str(time.time())+'.jpg'
-                image.save(img_name)
-                
-                image_ori[i,:,:,:] = show
-        '''
-
-
 
 
         if y is not None:
 
-            #计算每个head最大响应token
-            #_, part_inx, attention_map = self.part_select(all_weights)
-            #width = attention_map.size(-1)
 
-
-            #x_obj, _ = new_trans(x.to(torch.float32))
             x_obj, _ = self.resblocks[-1](x, func = new_trans)
-            #if torch.isnan(x_obj).any():
-            #    print('x_obj error')
 
-
-            '''
-            atten_mask = attention_map.contiguous().view(attention_map.size(0), attention_map.size(1), -1)
-
-            atten_mask = atten_mask/(torch.sum(atten_mask, dim=-1, keepdim=True) + 1e-6)
-
-            obj_atten_ori = torch.mean(atten_mask, dim=1, keepdim=True)
-
-            obj_atten =  rearrange(obj_atten_ori.clone(), 'a1 a2 a3 -> a1 a3 a2')
-
-
-            output_obj =  rearrange(x_obj[1:-1,:,:].clone(), 'a1 a2 a3 -> a2 a1 a3')
-
-
-            obj_feature = output_obj * obj_atten
-
-            if torch.isnan(obj_feature).any():
-                obj_feature = output_obj.float() * obj_atten.float()
-                obj_feature = obj_feature.half()
-
-
-            obj_feature = torch.sum(obj_feature, dim=1)
-            obj_feature = obj_feature.unsqueeze(0)
-            '''
- 
             o1_query = x_obj[-1,:,:].unsqueeze(0)
 
             out_ori = o1_query.clone()
@@ -670,12 +487,12 @@ class Transformer_visual(nn.Module):
             o1_new = torch.sum(o1_new, dim=1, keepdim=True)
         
             o1_new = 1.0*rearrange(o1_new, 'a1 a2 a3 -> a2 a1 a3') +  x_obj[0,:,:].unsqueeze(0) #(1, 256, 768) 
-            #print(o1_new)
+
 
             return output_ori, o1_new
         else:
 
-            #计算每个head最大响应token
+
             _, part_inx, attention_map = self.part_select_ori(all_weights)
 
             width = attention_map.size(-1)
@@ -704,23 +521,7 @@ class Transformer_visual(nn.Module):
             obj_feature = torch.sum(obj_feature, dim=1)
             obj_feature = obj_feature.unsqueeze(0)
 
-            
-            '''            
-            part_atten = obj_atten_ori + 0.1*atten_mask 
-
-            parts = []
-
-            for i in range (12):
-             
-                temp_value = parts_ori[:, :, :]
-                temp = temp_value[:,1:,:]*part_atten[:,i,:].unsqueeze(2)
-                temp = torch.sum(temp, dim=1)
-
-                parts.append(temp)
-
-            parts = torch.stack(parts)
-            '''
-            #new_obj = torch.cat([obj_feature, parts], dim=0)
+           
 
             new_obj = obj_feature
 
@@ -749,7 +550,6 @@ class VisionTransformer(nn.Module):
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
-        #self.prompt_cls = nn.Parameter(torch.empty(width))
 
 
         self.input_resolution = input_resolution
@@ -758,7 +558,6 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor, y=None, new_trans=None):
 
-        #image_ori = x.clone()
 
         if x.size(-1)!=self.input_resolution:
             x =  F.interpolate(x, size=[self.input_resolution, self.input_resolution], mode='bicubic')
@@ -773,43 +572,16 @@ class VisionTransformer(nn.Module):
         
         posemb = self.positional_embedding.to(x.dtype).unsqueeze(0)
 
-
-        '''
-        ntok_new = x.size(1) -1
-        
-        posemb_tok, posemb_grid = posemb[:, :1].clone(), posemb[0, 1:].clone()
-
-
-        gs_old = int(np.sqrt(posemb_grid.size(0)))
-        gs_new = int(np.sqrt(ntok_new))
-
-        posemb_grid = posemb_grid.unsqueeze(0)
-        posemb_grid = posemb_grid.contiguous().view(posemb_grid.size(0), gs_old, gs_old, -1)
-
-        posemb_grid =  rearrange(posemb_grid, 'a1 a2 a3 a4 -> a1 a4 a2 a3')
-
-        posemb_grid = F.interpolate(posemb_grid, size=[gs_new, gs_new], mode='bilinear')
-        posemb_grid = posemb_grid.contiguous().view(posemb_grid.size(0), posemb_grid.size(1), -1)
-        posemb_grid =  rearrange(posemb_grid, 'a1 a2 a3 -> a1 a3 a2')
-
-        posemb = torch.cat([posemb_tok, posemb_grid], axis=1)
-        '''
-
         x = x + posemb
 
 
 
         if y is not None:
-            #x[:,0,:] = x[:,0,:].clone() + y.cuda().unsqueeze(0)
+
             obj_token = y.cuda().to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device)
 
             x = torch.cat([x, obj_token], dim=1)
-            #x[:,0,:] = x[:,0,:].clone() + obj_token[:,0,:]
-            '''
-            obj_token = x[:,0,:].clone() + y.cuda().unsqueeze(0)
-            obj_token = obj_token.unsqueeze(dim=1)
-            x = torch.cat([x, obj_token], dim=1)
-            '''
+
 
 
         x = self.ln_pre(x)
@@ -844,7 +616,7 @@ class VisionTransformer(nn.Module):
                 out1 = out1 @ self.proj
                 out2 = out2 @ self.proj
 
-        #print(out1.shape, out2.shape)
+
 
         return out1, out2
 
@@ -1044,4 +816,3 @@ def build_model(state_dict: dict):
     model.load_state_dict(state_dict)
 
     return model
-    #return model.eval()

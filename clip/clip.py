@@ -12,6 +12,7 @@ from tqdm import tqdm
 from .model import build_model
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer
 
+
 try:
     from torchvision.transforms import InterpolationMode
     BICUBIC = InterpolationMode.BICUBIC
@@ -25,6 +26,7 @@ if torch.__version__.split(".") < ["1", "7", "1"]:
 
 __all__ = ["available_models", "load", "tokenize"]
 _tokenizer = _Tokenizer()
+
 
 _MODELS = {
     "RN50": "https://openaipublic.azureedge.net/clip/models/afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762/RN50.pt",
@@ -74,8 +76,6 @@ def _convert_image_to_rgb(image):
 
 def _transform(n_px): 
 
-    #print(n_px)
-
     return Compose([
         Resize(n_px, interpolation=BICUBIC),
         CenterCrop(n_px),
@@ -121,7 +121,6 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         model_path = name
     else:
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
-
     try:
         # loading JIT archive
         model = torch.jit.load(model_path, map_location=device if jit else "cpu").eval()

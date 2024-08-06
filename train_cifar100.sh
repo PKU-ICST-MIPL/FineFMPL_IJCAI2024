@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=2 python main.py --config configs/cifar100.yaml -dataset 'cifar100'
+CUDA_VISIBLE_DEVICES=1 python main.py --config configs/cifar100.yaml -dataset 'cifar100'
